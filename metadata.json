@@ -1,0 +1,6 @@
+{
+  "name": "Document Generator",
+  "description": "Multi-company SaaS invoice, quotation, and work order generator with beautiful PDF preview, company settings, and customer management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+/* Print Overrides */
+@media print {
+  /* Hide standard page headers, footers, margins */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  /* Hide all interactive app elements */
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  /* Make sure only the printable container is visible */
+  #printable-document, #printable-document * {
+    visibility: visible;
+  }
+
+  #printable-document {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm;
+    height: 297mm;
+    padding: 20mm;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    transform: none !important;
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Fix for chrome page breaks and layouts */
+  .print\:hidden {
+    display: none !important;
+  }
+}
