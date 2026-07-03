@@ -14,16 +14,40 @@ import {
   Trash2,
   Lock,
   Sparkles,
-  ToggleLeft
+  ToggleLeft,
+  FileSpreadsheet,
+  ExternalLink,
+  LogOut,
+  CloudLightning
 } from 'lucide-react';
 import { db, SUPABASE_SQL_SCRIPT, isSupabaseConnected } from '../lib/database';
 import { Company, AppSettings } from '../types';
+import { 
+  googleSignIn, 
+  logoutGoogle, 
+  getAccessToken, 
+  getGoogleSheetsId, 
+  getGoogleSheetsUrl, 
+  createGoogleSheet,
+  setGoogleSheetsId,
+  hasAccessToken
+} from '../lib/googleAuth';
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<'companies' | 'numbering' | 'database'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'numbering' | 'database' | 'google'>('companies');
   const [companies, setCompanies] = useState<Company[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Google Sheets states
+  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [sheetId, setSheetId] = useState<string | null>(null);
+  const [sheetUrl, setSheetUrl] = useState<string | null>(null);
+  const [creatingSheet, setCreatingSheet] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [customSheetIdInput, setCustomSheetIdInput] = useState('');
+
   
   // Active company to edit (0 or 1, since there are exactly 2 companies)
   const [selectedCompIndex, setSelectedCompIndex] = useState<number>(0);
@@ -53,6 +77,24 @@ export default function Settings() {
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    async function loadGoogleState() {
+      try {
+        const token = await getAccessToken();
+        setGoogleToken(token);
+        const currentSheetId = getGoogleSheetsId();
+        setSheetId(currentSheetId);
+        setSheetUrl(getGoogleSheetsUrl());
+        if (currentSheetId) {
+          setCustomSheetIdInput(currentSheetId);
+        }
+      } catch (err) {
+        console.error('Error loading Google state:', err);
+      }
+    }
+    loadGoogleState();
+  }, [activeTab]);
+
   const handleCompanySave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (companies.length === 0) return;
@@ -78,6 +120,73 @@ export default function Settings() {
       console.error('Error saving prefix settings:', err);
       triggerFeedback('Error saving prefixes.');
     }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setGoogleToken(result.accessToken);
+        setGoogleUser(result.user);
+        setSheetId(getGoogleSheetsId());
+        setSheetUrl(getGoogleSheetsUrl());
+        triggerFeedback('Google Account connected successfully!');
+      }
+    } catch (err) {
+      console.error('Google sign in error:', err);
+      triggerFeedback('Failed to connect Google account.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleDisconnect = async () => {
+    try {
+      await logoutGoogle();
+      setGoogleToken(null);
+      setGoogleUser(null);
+      setSheetId(null);
+      setSheetUrl(null);
+      triggerFeedback('Google account disconnected.');
+    } catch (err) {
+      console.error('Disconnect error:', err);
+      triggerFeedback('Failed to disconnect.');
+    }
+  };
+
+  const handleCreateSheet = async () => {
+    if (!googleToken) {
+      triggerFeedback('Please connect your Google Account first.');
+      return;
+    }
+    setCreatingSheet(true);
+    try {
+      const res = await createGoogleSheet(googleToken);
+      setSheetId(res.id);
+      setSheetUrl(res.url);
+      setCustomSheetIdInput(res.id);
+      triggerFeedback('New Google Sheet created successfully!');
+    } catch (err) {
+      console.error('Create sheet error:', err);
+      triggerFeedback('Failed to create Google Sheet.');
+    } finally {
+      setCreatingSheet(false);
+    }
+  };
+
+  const handleSaveCustomSheetId = () => {
+    if (!customSheetIdInput.trim()) {
+      setGoogleSheetsId(null);
+      setSheetId(null);
+      setSheetUrl(null);
+      triggerFeedback('Google Sheet unlinked.');
+      return;
+    }
+    setGoogleSheetsId(customSheetIdInput.trim());
+    setSheetId(customSheetIdInput.trim());
+    setSheetUrl(getGoogleSheetsUrl());
+    triggerFeedback('Google Sheet ID saved successfully!');
   };
 
   const triggerFeedback = (msg: string) => {
@@ -188,6 +297,19 @@ export default function Settings() {
         >
           <Database size={16} />
           <span>Supabase SQL Script</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('google')}
+          className={`flex items-center gap-2 px-5 py-3 text-xs md:text-sm font-semibold border-b-2 transition-all duration-150
+            ${activeTab === 'google' 
+              ? 'border-blue-600 text-blue-600 dark:text-blue-400 font-bold' 
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+            }
+          `}
+        >
+          <FileSpreadsheet size={16} className="text-emerald-600 dark:text-emerald-500" />
+          <span>Google Sheets Sync</span>
         </button>
       </div>
 
@@ -855,6 +977,197 @@ export default function Settings() {
                 <HelpCircle size={16} className="text-blue-500 shrink-0 mt-0.5" />
                 <span className="text-[11px] text-slate-500 leading-normal">
                   <strong>Note:</strong> We also support <strong>Supabase Authentication</strong>! Clicking the bottom left profile connector allows you to connect auth to secure user invoice databases!
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 4: Google Sheets Sync */}
+      {activeTab === 'google' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-3xl p-6 shadow-sm space-y-6">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base flex items-center gap-2">
+                <FileSpreadsheet size={18} className="text-emerald-500" />
+                <span>Google Sheets Integration Settings</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Establish a live-sync log of all your generated documents inside Google Sheets.
+              </p>
+            </div>
+
+            {/* Connection Status */}
+            <div className="bg-slate-50 dark:bg-slate-800/40 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">Connection Status</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {googleToken ? 'Connected and authorized for Spreadsheet logging.' : 'Not connected. Authenticate to enable automatic spreadsheet logging.'}
+                  </p>
+                </div>
+
+                {googleToken ? (
+                  <button
+                    onClick={handleGoogleDisconnect}
+                    className="inline-flex items-center gap-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 hover:dark:bg-red-950/50 text-red-600 dark:text-red-400 text-xs font-bold px-4 py-2.5 rounded-xl border border-red-200/40 transition cursor-pointer"
+                  >
+                    <LogOut size={14} />
+                    <span>Disconnect</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleGoogleSignIn}
+                    disabled={googleLoading}
+                    className="inline-flex items-center gap-2.5 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold px-4 py-2.5 rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {googleLoading ? (
+                      <RefreshCw size={14} className="animate-spin text-blue-500" />
+                    ) : (
+                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#EA4335" d="M12 5.04c1.62 0 3.08.56 4.22 1.65l3.15-3.15C17.45 1.76 14.92 1 12 1 7.35 1 3.39 3.65 1.5 7.5l3.6 2.79C6.01 7.07 8.74 5.04 12 5.04z" />
+                        <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.43h6.46c-.28 1.45-1.1 2.68-2.33 3.51l3.6 2.79c2.1-1.94 3.31-4.79 3.31-8.39z" />
+                        <path fill="#FBBC05" d="M5.1 14.71c-.24-.71-.38-1.47-.38-2.27s.14-1.56.38-2.27L1.5 7.38C.54 9.31 0 11.48 0 13.8s.54 4.49 1.5 6.42l3.6-2.81z" />
+                        <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.6-2.79c-1.1.74-2.5 1.18-4.36 1.18-3.26 0-5.99-2.03-6.98-5.25l-3.6 2.81C3.39 20.35 7.35 23 12 23z" />
+                      </svg>
+                    )}
+                    <span>Connect Google Account</span>
+                  </button>
+                )}
+              </div>
+
+              {googleToken && (
+                <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-950/30 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900/40 animate-fade-in">
+                  <CheckCircle size={14} className="shrink-0" />
+                  <span>Google Account connected. Spreadsheet Logging is ready!</span>
+                </div>
+              )}
+            </div>
+
+            {/* Sheet setup section */}
+            {googleToken && (
+              <div className="space-y-5 border-t border-slate-100 dark:border-slate-800 pt-5">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">Spreadsheet Selection</h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Choose to create a brand new Google Sheet or link an existing Spreadsheet ID.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Option A: Create Auto */}
+                  <div className="border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-4 bg-slate-50/50 dark:bg-slate-800/10">
+                    <div>
+                      <span className="inline-block bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 text-[10px] font-bold px-2 py-0.5 rounded-full mb-2">Recommended</span>
+                      <h5 className="text-xs font-bold text-slate-800 dark:text-slate-100">Create New Spreadsheet</h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-normal">
+                        Automatically create a sheet named "DocGen Documents Log" with all required headers initialized.
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={handleCreateSheet}
+                      disabled={creatingSheet}
+                      className="w-full inline-flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs py-2.5 rounded-xl shadow-md shadow-blue-500/10 transition cursor-pointer"
+                    >
+                      {creatingSheet ? (
+                        <>
+                          <RefreshCw size={14} className="animate-spin" />
+                          <span>Creating Sheet...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus size={14} />
+                          <span>Create New Sheet</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Option B: Manual Input */}
+                  <div className="border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between space-y-4 bg-slate-50/50 dark:bg-slate-800/10">
+                    <div>
+                      <span className="inline-block bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-bold px-2 py-0.5 rounded-full mb-2">Custom Sheet</span>
+                      <h5 className="text-xs font-bold text-slate-800 dark:text-slate-100">Link Existing Spreadsheet ID</h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-normal">
+                        Paste the Spreadsheet ID from any Google Sheet URL to append log rows to it.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={customSheetIdInput}
+                        onChange={(e) => setCustomSheetIdInput(e.target.value)}
+                        placeholder="Spreadsheet ID (from URL)"
+                        className="w-full p-2 text-[11px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={handleSaveCustomSheetId}
+                        className="w-full bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold text-[11px] py-1.5 rounded-xl transition cursor-pointer"
+                      >
+                        Link Spreadsheet
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Active sheet ID & link display */}
+                {sheetId && (
+                  <div className="p-4 bg-emerald-50/50 dark:bg-emerald-950/10 rounded-2xl border border-emerald-100/40 dark:border-emerald-900/20 space-y-3 animate-fade-in">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Linked Google Sheet ID</span>
+                        <code className="text-xs font-mono text-slate-600 dark:text-slate-300 break-all">{sheetId}</code>
+                      </div>
+                      
+                      {sheetUrl && (
+                        <a
+                          href={sheetUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold shrink-0"
+                        >
+                          <span>Open Sheet</span>
+                          <ExternalLink size={14} />
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>Log auto-sync is active. Any document you save from now on will append to this sheet!</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quick Guide card */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-3xl p-6 shadow-sm h-fit space-y-4">
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base border-b border-slate-50 dark:border-slate-800 pb-3 flex items-center gap-2">
+              <CloudLightning size={16} className="text-emerald-500" />
+              <span>Real-time Log Benefits</span>
+            </h3>
+
+            <div className="space-y-4 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              <p>
+                Connecting Google Sheets allows you to maintain central bookkeeping with zero extra effort:
+              </p>
+
+              <ul className="list-disc list-inside space-y-2.5">
+                <li><strong>Automatic Records</strong>: Every document saved (Invoices, Quotations, and Work Orders) adds a descriptive log entry row.</li>
+                <li><strong>Central Dashboard</strong>: View aggregate financial counts, dates, and statuses of all generated items directly in Google Drive.</li>
+                <li><strong>Easy Sharing</strong>: Collaborate with accounting, tax professionals, or leadership by sharing the read-only or editable Sheet link.</li>
+                <li><strong>Audit Ready</strong>: Download spreadsheets as Excel, PDF, or CSV formats instantly from your Google account.</li>
+              </ul>
+
+              <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-start gap-2.5 mt-2">
+                <HelpCircle size={16} className="text-blue-500 shrink-0 mt-0.5" />
+                <span className="text-[11px] text-slate-500 leading-normal">
+                  <strong>Access scope note:</strong> Your connection uses the secure <code className="bg-slate-100 dark:bg-slate-800 p-0.5 rounded font-mono text-[10px]">drive.file</code> scope which restricts our app to accessing only the specific files created by this tool.
                 </span>
               </div>
             </div>

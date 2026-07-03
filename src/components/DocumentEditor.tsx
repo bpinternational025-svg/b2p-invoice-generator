@@ -23,6 +23,7 @@ import {
 import { db } from '../lib/database';
 import { numberToWords } from '../lib/numberToWords';
 import { Company, Customer, Service, Document, DocumentItem, DocumentType, AppSettings } from '../types';
+import { getAccessToken, appendDocumentToGoogleSheet } from '../lib/googleAuth';
 
 export default function DocumentEditor() {
   const navigate = useNavigate();
@@ -305,7 +306,28 @@ export default function DocumentEditor() {
 
     try {
       await db.saveDocument(savedDoc);
-      setFeedback('Document saved successfully!');
+      
+      // Auto-sync to Google Sheets if connected
+      let syncedFeedback = 'Document saved successfully!';
+      const token = await getAccessToken();
+      if (token) {
+        try {
+          const comp = companies.find(c => c.id === companyId);
+          const cust = customers.find(cu => cu.id === customerId);
+          await appendDocumentToGoogleSheet(
+            token,
+            savedDoc,
+            comp?.name || 'Unknown Company',
+            cust?.name || 'Unknown Customer'
+          );
+          syncedFeedback = 'Saved & Synced to Google Sheets!';
+        } catch (sheetErr) {
+          console.error('Google Sheets sync failed:', sheetErr);
+          syncedFeedback = 'Saved locally (Sheets sync failed)';
+        }
+      }
+      
+      setFeedback(syncedFeedback);
       setTimeout(() => {
         setFeedback(null);
         navigate(`/documents/${docId}`); // Go straight to beautiful print preview page!
